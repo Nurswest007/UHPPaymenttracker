@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>UHP Health Clearance Payment Tracker</title>
+    <style>
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid black; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        form { margin-top: 20px; }
+        label { display: block; margin: 5px 0; }
+        button { margin-top: 10px; margin-right: 10px; }
+        .delete-btn { 
+            background-color: #dc3545; 
+            color: white; 
+            border: none; 
+            padding: 5px 10px; 
+            cursor: pointer; 
+            margin-right: 5px; 
+        }
+        .delete-btn:hover { background-color: #c82333; }
+        .edit-btn { 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            padding: 5px 10px; 
+            cursor: pointer; 
+        }
+        .edit-btn:hover { background-color: #0056b3; }
+    </style>
+</head>
+<body>
+    <h1>UHP Health Clearance Payment Tracker</h1>
+    <table id="paymentTable">
+        <thead>
+            <tr>
+                <th>LAST NAME</th>
+                <th>FIRST NAME</th>
+                <th>CURRENT DATE</th>
+                <th>COHORT</th>
+                <th>SEMESTER</th>
+                <th>YEAR</th>
+                <th>PAYMENT DEADLINE</th>
+                <th>STATUS</th>
+                <th>AMOUNT</th>
+                <th>PAYMENT DATE</th>
+                <th>NOTES</th>
+                <th>ACTION</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+    </table>
+
+    <form id="paymentForm">
+        <label>Last Name: <input type="text" id="lastName" required></label>
+        <label>First Name: <input type="text" id="firstName" required></label>
+        <label>Current Date: <input type="date" id="currentDate" required></label>
+        <label>Cohort: 
+            <select id="cohort" required>
+                <option value="DEN">DEN</option>
+                <option value="DNP">DNP</option>
+                <option value="GEPN">GEPN</option>
+                <option value="ORNBSN">ORNBSN</option>
+                <option value="TRAD">TRAD</option>
+                <option value="WEST">WEST</option>
+            </select>
+        </label>
+        <label>Semester: 
+            <select id="semester" required>
+                <option value="FALL">FALL</option>
+                <option value="SPRING">SPRING</option>
+                <option value="SUMMER">SUMMER</option>
+            </select>
+        </label>
+        <label>Year: <input type="number" id="year" required></label>
+        <label>Payment Deadline: <input type="date" id="paymentDeadline" required readonly></label>
+        <label>Amount: <input type="number" id="amount" step="0.01" required></label>
+        <label>Status: 
+            <select id="status" required>
+                <option value="PENDING">PENDING</option>
+                <option value="PAID">PAID</option>
+            </select>
+        </label>
+        <label>Payment Date: <input type="date" id="paymentDate"></label>
+        <label>Notes: <textarea id="notes"></textarea></label>
+        <button type="submit" id="submitBtn">Add/Update Entry</button>
+        <button type="button" id="downloadBtn">Download JSON</button>
+        <button type="button" id="exportCsvBtn">Export to CSV</button>
+        <label>Import JSON: <input type="file" id="importFile" accept=".json"></label>
+        <label>Import CSV: <input type="file" id="importCsv" accept=".csv"></label>
+    </form>
+
+    <script>
+        // Initial data from localStorage
+        let payments = JSON.parse(localStorage.getItem('uhpPayments')) || [];
+        let editingIndex = null;
+
+        // Current date (February 21, 2025)
+        const today = new Date('2025-02-21');
+        const currentYear = today.getFullYear();
+        const todayFormatted = today.toISOString().split('T')[0];
+
+        // Set defaults
+        document.getElementById('currentDate').value = todayFormatted;
+        document.getElementById('year').value = currentYear;
+
+        // Function to set payment deadline based on year and semester
+        function updatePaymentDeadline() {
+            const year = document.getElementById('year').value;
+            const semester = document.getElementById('semester').value;
+            const paymentDeadlineInput = document.getElementById('paymentDeadline');
+
+            if (year && semester) {
+                let deadlineMonth;
+                switch (semester) {
+                    case 'SPRING': deadlineMonth = '01'; break;
+                    case 'SUMMER': deadlineMonth = '05'; break;
+                    case 'FALL': deadlineMonth = '08'; break;
+                }
+                paymentDeadlineInput.value = `${year}-${deadlineMonth}-15`;
+            } else {
+                paymentDeadlineInput.value = '';
+            }
+        }
+
+        // Event listeners for year, semester, and status changes
+        document.getElementById('year').addEventListener('input', updatePaymentDeadline);
+        document.getElementById('semester').addEventListener('change', updatePaymentDeadline);
+        document.getElementById('status').addEventListener('change', function() {
+            const status = this.value;
+            const paymentDateInput = document.getElementById('paymentDate');
+            paymentDateInput.value = (status === 'PAID') ? todayFormatted : '';
+        });
+        updatePaymentDeadline();
+
+        // Function to determine status based on deadline
+        function getStatus(payment) {
+            const deadlineDate = new Date(payment.paymentDeadline);
+            const currentDate = new Date(payment.currentDate);
+            return (deadlineDate < currentDate && payment.status !== 'PAID') ? 'OVERDUE' : payment.status;
+        }
+
+        // Function to display data in table
+        function displayData() {
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = '';
+            payments.forEach((payment, index) => {
+                const status = getStatus(payment);
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${payment.lastName}</td>
+                    <td>${payment.firstName}</td>
+                    <td>${payment.currentDate}</td>
+                    <td>${payment.cohort}</td>
+                    <td>${payment.semester}</td>
+                    <td>${payment.year}</td>
+                    <td>${payment.paymentDeadline}</td>
+                    <td>${status}</td>
+                    <td>$${payment.amount}</td>
+                    <td>${payment.paymentDate || ''}</td>
+                    <td>${payment.notes || ''}</td>
+                    <td>
+                        <button class="delete-btn" onclick="deleteEntry(${index})">Delete</button>
+                        <button class="edit-btn" onclick="editEntry(${index})">Edit</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        // Function to delete an entry
+        function deleteEntry(index) {
+            if (confirm('Are you sure you want to delete this entry?')) {
+                payments.splice(index, 1);
+                localStorage.setItem('uhpPayments', JSON.stringify(payments));
+                displayData();
+            }
+        }
+
+        // Function to edit an entry
+        function editEntry(index) {
+            editingIndex = index;
+            const payment = payments[index];
+            document.getElementById('lastName').value = payment.lastName;
+            document.getElementById('firstName').value = payment.firstName;
+            document.getElementById('currentDate').value = payment.currentDate;
+            document.getElementById('cohort').value = payment.cohort;
+            document.getElementById('semester').value = payment.semester;
+            document.getElementById('year').value = payment.year;
+            document.getElementById('paymentDeadline').value = payment.paymentDeadline;
+            document.getElementById('amount').value = payment.amount;
+            document.getElementById('status').value = payment.status;
+            document.getElementById('paymentDate').value = payment.paymentDate || '';
+            document.getElementById('notes').value = payment.notes || '';
+            document.getElementById('submitBtn').textContent = 'Update Entry';
+        }
+
+        // Form submission to add/update data
+        document.getElementById('paymentForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const status = document.getElementById('status').value;
+            const newPayment = {
+                lastName: document.getElementById('lastName').value.toUpperCase(),
+                firstName: document.getElementById('firstName').value.toUpperCase(),
+                currentDate: document.getElementById('currentDate').value,
+                cohort: document.getElementById('cohort').value,
+                semester: document.getElementById('semester').value,
+                year: parseInt(document.getElementById('year').value),
+                paymentDeadline: document.getElementById('paymentDeadline').value,
+                amount: parseFloat(document.getElementById('amount').value),
+                status: status,
+                paymentDate: (status === 'PAID') ? document.getElementById('paymentDate').value || todayFormatted : '',
+                notes: document.getElementById('notes').value
+            };
+
+            if (editingIndex !== null) {
+                payments[editingIndex] = newPayment;
+                editingIndex = null;
+                document.getElementById('submitBtn').textContent = 'Add/Update Entry';
+            } else {
+                const index = payments.findIndex(p => 
+                    p.lastName === newPayment.lastName && 
+                    p.firstName === newPayment.firstName && 
+                    p.semester === newPayment.semester
+                );
+                if (index >= 0) {
+                    payments[index] = newPayment;
+                } else {
+                    payments.push(newPayment);
+                }
+            }
+
+            localStorage.setItem('uhpPayments', JSON.stringify(payments));
+            displayData();
+            this.reset();
+            document.getElementById('currentDate').value = todayFormatted;
+            document.getElementById('year').value = currentYear;
+            document.getElementById('paymentDate').value = '';
+            updatePaymentDeadline();
+        });
+
+        // Download JSON file
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payments, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "uhp_payment_tracker.json");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        });
+
+        // Export to CSV file (New Functionality)
+        document.getElementById('exportCsvBtn').addEventListener('click', function() {
+            // Define CSV headers
+            const headers = [
+                "LAST NAME", "FIRST NAME", "CURRENT DATE", "COHORT", "SEMESTER", 
+                "YEAR", "PAYMENT DEADLINE", "STATUS", "AMOUNT", "PAYMENT DATE", "NOTES"
+            ];
+            
+            // Convert payments data to CSV rows
+            const csvRows = payments.map(payment => {
+                const status = getStatus(payment);
+                return [
+                    payment.lastName,
+                    payment.firstName,
+                    payment.currentDate,
+                    payment.cohort,
+                    payment.semester,
+                    payment.year,
+                    payment.paymentDeadline,
+                    status,
+                    payment.amount,
+                    payment.paymentDate || '',
+                    `"${payment.notes || ''}"` // Wrap notes in quotes to handle commas
+                ].join(',');
+            });
+
+            // Combine headers and rows
+            const csvContent = [headers.join(','), ...csvRows].join('\n');
+            const dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
+            
+            // Create and trigger download
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "uhp_payment_tracker.csv");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        });
+
+        // Import JSON file
+        document.getElementById('importFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        const importedPayments = JSON.parse(event.target.result);
+                        importedPayments.forEach(payment => {
+                            if (payment.name && !payment.lastName && !payment.firstName) {
+                                const [first, ...last] = payment.name.split(' ');
+                                payment.lastName = last.join(' ').toUpperCase();
+                                payment.firstName = first.toUpperCase();
+                                delete payment.name;
+                            }
+                            payment.lastName = payment.lastName.toUpperCase();
+                            payment.firstName = payment.firstName.toUpperCase();
+                            payment.cohort = payment.cohort.toUpperCase();
+                            payment.status = payment.status ? payment.status.toUpperCase() : 'PENDING';
+                            payment.currentDate = payment.currentDate || todayFormatted;
+                            payment.semester = payment.semester || 'FALL';
+                            payment.year = payment.year || currentYear;
+                            payment.paymentDeadline = payment.paymentDeadline || `${payment.year}-08-15`;
+                            payment.amount = payment.amount || 0;
+                            payment.paymentDate = (payment.status === 'PAID') ? (payment.paymentDate || todayFormatted) : '';
+                            payment.notes = payment.notes || '';
+                        });
+                        payments = importedPayments;
+                        localStorage.setItem('uhpPayments', JSON.stringify(payments));
+                        displayData();
+                        alert('Data imported successfully!');
+                    } catch (err) {
+                        alert('Error importing JSON: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Import CSV file
+        document.getElementById('importCsv').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        const csvText = event.target.result;
+                        const lines = csvText.split('\n').filter(line => line.trim() !== '');
+                        const headers = lines[0].split(',').map(header => header.trim().toLowerCase());
+                        const importedPayments = lines.slice(1).map(line => {
+                            const values = line.split(',').map(value => value.trim());
+                            const payment = {};
+                            headers.forEach((header, index) => {
+                                if (header === 'last name') payment.lastName = values[index].toUpperCase();
+                                if (header === 'first name') payment.firstName = values[index].toUpperCase();
+                                if (header === 'cohort') payment.cohort = values[index].toUpperCase();
+                            });
+                            payment.currentDate = todayFormatted;
+                            payment.semester = 'FALL';
+                            payment.year = currentYear;
+                            payment.paymentDeadline = `${payment.year}-08-15`;
+                            payment.amount = 0;
+                            payment.status = 'PENDING';
+                            payment.paymentDate = '';
+                            payment.notes = '';
+                            return payment;
+                        });
+                        payments = importedPayments;
+                        localStorage.setItem('uhpPayments', JSON.stringify(payments));
+                        displayData();
+                        alert('CSV imported successfully!');
+                    } catch (err) {
+                        alert('Error importing CSV: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Display data on page load
+        displayData();
+    </script>
+</body>
+</html>
